@@ -4,6 +4,8 @@ import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
 
+import forum.common.ClientHandler;
+
 /**
  * Point d'entrée du serveur de forum.
  * Écoute les connexions entrantes et crée un ClientHandler par client.

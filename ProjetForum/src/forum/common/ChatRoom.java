@@ -3,7 +3,9 @@ package forum.common;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Représentation d'un salon de discussion (thread-safe).
@@ -16,6 +18,7 @@ public class ChatRoom implements Serializable {
     private String creator;
     private List<String> members;
     private int messageCount;
+    private transient Map<String, String> bannedUsers;
 
     public ChatRoom(String name, String topic, String creator) {
         this.name = name;
@@ -23,6 +26,7 @@ public class ChatRoom implements Serializable {
         this.creator = creator;
         this.members = Collections.synchronizedList(new ArrayList<>());
         this.messageCount = 0;
+        this.bannedUsers = new HashMap<String, String>();
     }
 
     public synchronized void addMember(String username) {
@@ -33,6 +37,20 @@ public class ChatRoom implements Serializable {
 
     public synchronized void removeMember(String username) {
         members.remove(username);
+    }
+
+    public synchronized void banUser(String username, String reason) {
+        if (bannedUsers == null) bannedUsers = new HashMap<String, String>();
+        bannedUsers.put(username, reason);
+        removeMember(username);
+    }
+
+    public synchronized boolean isBanned(String username) {
+        return bannedUsers != null && bannedUsers.containsKey(username);
+    }
+
+    public synchronized String getBanReason(String username) {
+        return bannedUsers != null ? bannedUsers.get(username) : null;
     }
 
     public synchronized boolean hasMember(String username) {

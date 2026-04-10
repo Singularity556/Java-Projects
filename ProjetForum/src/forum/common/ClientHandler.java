@@ -1,11 +1,10 @@
-package forum.server;
-
-import forum.common.ChatRoom;
-import forum.common.Message;
+package forum.common;
 
 import java.io.*;
 import java.net.Socket;
 import java.util.List;
+
+import forum.server.RoomManager;
 
 /**
  * Thread dédié à la gestion d'un client connecté.
@@ -140,6 +139,86 @@ public class ClientHandler implements Runnable {
                 break;
             }
 
+            case KICK_USER: {
+                String roomName = msg.getRoomName();
+                String payload = msg.getContent();
+                int sep = payload.indexOf('|');
+                if (sep < 0) {
+                    sendError("Format invalide.");
+                    return;
+                }
+                String target = payload.substring(0, sep);
+                String reason = payload.substring(sep + 1);
+
+                ChatRoom room = roomManager.getRoom(roomName);
+                if (room == null) {
+                    sendError("Le salon n'existe pas.");
+                    return;
+                }
+                if (!room.getCreator().equals(username)) {
+                    sendError("Seul l'administrateur peut expulser des utilisateurs.");
+                    return;
+                }
+                if (!room.hasMember(target)) {
+                    sendError("L'utilisateur n'est pas dans le salon.");
+                    return;
+                }
+                roomManager.leaveRoom(roomName, target);
+
+                Message kicked = new Message(Message.Type.KICKED);
+                kicked.setRoomName(roomName);
+                kicked.setContent("Vous avez \u00e9t\u00e9 expuls\u00e9 du salon \"" + roomName + "\" par " + username + ".\nRaison : " + reason);
+                roomManager.sendToUser(target, kicked);
+
+                Message left = new Message(Message.Type.USER_LEFT);
+                left.setSender(target);
+                left.setRoomName(roomName);
+                left.setContent(target + " a \u00e9t\u00e9 expuls\u00e9 du salon.");
+                roomManager.broadcastToRoom(roomName, left);
+                roomManager.broadcastMemberList(roomName);
+                break;
+            }
+
+            case BAN_USER: {
+                String roomName = msg.getRoomName();
+                String payload = msg.getContent();
+                int sep = payload.indexOf('|');
+                if (sep < 0) {
+                    sendError("Format invalide.");
+                    return;
+                }
+                String target = payload.substring(0, sep);
+                String reason = payload.substring(sep + 1);
+
+                ChatRoom room = roomManager.getRoom(roomName);
+                if (room == null) {
+                    sendError("Le salon n'existe pas.");
+                    return;
+                }
+                if (!room.getCreator().equals(username)) {
+                    sendError("Seul l'administrateur peut bannir des utilisateurs.");
+                    return;
+                }
+                if (!room.hasMember(target)) {
+                    sendError("L'utilisateur n'est pas dans le salon.");
+                    return;
+                }
+                room.banUser(target, reason);
+
+                Message banned = new Message(Message.Type.BANNED);
+                banned.setRoomName(roomName);
+                banned.setContent("Vous avez été banni du salon \"" + roomName + "\" par " + username + ".\nRaison : " + reason);
+                roomManager.sendToUser(target, banned);
+
+                Message left = new Message(Message.Type.USER_LEFT);
+                left.setSender(target);
+                left.setRoomName(roomName);
+                left.setContent(target + " a été banni du salon.");
+                roomManager.broadcastToRoom(roomName, left);
+                roomManager.broadcastMemberList(roomName);
+                break;
+            }
+
             default:
                 sendError("Type de message inconnu : " + msg.getType());
                 break;
@@ -183,6 +262,12 @@ public class ClientHandler implements Runnable {
             sendError("Le salon \"" + roomName + "\" n'existe pas.");
             return;
         }
+        if (room.isBanned(username)) {
+            String banReason = room.getBanReason(username);
+            sendError("Vous \u00eates banni du salon \"" + roomName + "\"."
+                    + (banReason != null ? "\nRaison : " + banReason : ""));
+            return;
+        }
 
         boolean wasAlreadyMember = room.hasMember(username);
 
@@ -195,6 +280,7 @@ public class ClientHandler implements Runnable {
         Message ok = new Message(Message.Type.ROOM_JOINED);
         ok.setRoomName(roomName);
         ok.setContent(room.getTopic());
+        ok.setSender(room.getCreator());
         sendMessage(ok);
 
         if (!wasAlreadyMember) {

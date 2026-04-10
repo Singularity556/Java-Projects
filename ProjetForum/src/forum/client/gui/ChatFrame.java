@@ -5,6 +5,7 @@ import forum.common.Message;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
+import javax.swing.text.*;
 import java.awt.*;
 import java.awt.event.*;
 import java.util.HashMap;
@@ -16,18 +17,23 @@ import static forum.client.gui.LoginFrame.*;
 /**
  * Fenêtre de chat d'un salon. Affiche les messages, la liste des membres,
  * et permet d'envoyer des messages.
+ * Les messages de l'utilisateur courant sont alignés à droite.
+ * L'administrateur (créateur du salon) peut expulser ou bannir des membres.
  * Compatible Java 8+.
  */
 public class ChatFrame extends JFrame {
 
     private final String username;
     private final String roomName;
+    private final String roomCreator;
+    private final boolean isAdmin;
     private final ForumClient client;
     private final LobbyFrame lobby;
 
     private JTextPane chatArea;
     private JTextField inputField;
     private DefaultListModel<String> memberModel;
+    private JList<String> memberList;
 
     // Couleurs par utilisateur
     private final Map<String, Color> userColors = new HashMap<String, Color>();
@@ -43,12 +49,16 @@ public class ChatFrame extends JFrame {
     };
     private int colorIndex = 0;
 
-    public ChatFrame(String username, String roomName, String topic,
+    private static final Color ADMIN_COLOR = new Color(245, 158, 11);
+
+    public ChatFrame(String username, String roomName, String topic, String creator,
                      ForumClient client, LobbyFrame lobby) {
-        this.username = username;
-        this.roomName = roomName;
-        this.client   = client;
-        this.lobby    = lobby;
+        this.username    = username;
+        this.roomName    = roomName;
+        this.roomCreator = creator;
+        this.isAdmin     = username.equals(creator);
+        this.client      = client;
+        this.lobby       = lobby;
 
         setTitle("# " + roomName);
         setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
@@ -62,7 +72,10 @@ public class ChatFrame extends JFrame {
         setVisible(true);
 
         appendSystemMessage("Vous avez rejoint le salon # " + roomName
-                + (topic != null && !topic.trim().isEmpty() ? " — " + topic : ""));
+                + (topic != null && !topic.trim().isEmpty() ? " \u2014 " + topic : ""));
+        if (isAdmin) {
+            appendSystemMessage("\u2605 Vous \u00eates l'administrateur. Clic droit sur un membre pour le g\u00e9rer.");
+        }
     }
 
     // ─── UI ───────────────────────────────────────────────────────────────────
@@ -96,6 +109,17 @@ public class ChatFrame extends JFrame {
         titleArea.add(hashLbl);
         titleArea.add(roomLbl);
         titleArea.add(topicLbl);
+
+        if (isAdmin) {
+            JLabel adminBadge = new JLabel("  ADMIN");
+            adminBadge.setFont(new Font("Segoe UI", Font.BOLD, 10));
+            adminBadge.setForeground(ADMIN_COLOR);
+            adminBadge.setBorder(BorderFactory.createCompoundBorder(
+                    BorderFactory.createLineBorder(ADMIN_COLOR, 1, true),
+                    new EmptyBorder(2, 6, 2, 6)));
+            titleArea.add(Box.createHorizontalStrut(8));
+            titleArea.add(adminBadge);
+        }
 
         JButton leaveBtn = new JButton("Quitter le salon");
         leaveBtn.setFont(FONT_SUB);
@@ -136,17 +160,33 @@ public class ChatFrame extends JFrame {
 
         // Zone membres
         memberModel = new DefaultListModel<String>();
-        JList<String> memberList = new JList<String>(memberModel);
+        memberList = new JList<String>(memberModel);
         memberList.setBackground(BG_PANEL);
         memberList.setForeground(TEXT_MAIN);
         memberList.setFont(FONT_LABEL);
         memberList.setFixedCellHeight(36);
-        memberList.setCellRenderer(new MemberCellRenderer(username));
+        memberList.setCellRenderer(new MemberCellRenderer(username, roomCreator));
+
+        // Menu contextuel admin (clic droit)
+        memberList.addMouseListener(new MouseAdapter() {
+            public void mousePressed(MouseEvent e)  { checkPopup(e); }
+            public void mouseReleased(MouseEvent e) { checkPopup(e); }
+            private void checkPopup(MouseEvent e) {
+                if (!e.isPopupTrigger() || !isAdmin) return;
+                int index = memberList.locationToIndex(e.getPoint());
+                if (index < 0) return;
+                memberList.setSelectedIndex(index);
+                String target = memberModel.get(index);
+                if (target.equals(username)) return;
+                showAdminPopup(e.getComponent(), e.getX(), e.getY(), target);
+            }
+        });
 
         JPanel memberPanel = new JPanel(new BorderLayout());
         memberPanel.setBackground(BG_PANEL);
 
-        JLabel memberTitle = new JLabel("Membres");
+        String memberTitleText = isAdmin ? "Membres (clic droit = g\u00e9rer)" : "Membres";
+        JLabel memberTitle = new JLabel(memberTitleText);
         memberTitle.setFont(new Font("Segoe UI", Font.BOLD, 12));
         memberTitle.setForeground(TEXT_SUB);
         memberTitle.setBorder(BorderFactory.createCompoundBorder(
@@ -186,7 +226,7 @@ public class ChatFrame extends JFrame {
 
         //final JButton sendBtn = new JButton("Envoyer \u27A4");
         final JButton sendBtn = new JButton("Envoyer  \u25B6"); // ▶ solid triangle, universally supported
-        
+
         sendBtn.setFont(FONT_BTN);
         sendBtn.setForeground(Color.WHITE);
         sendBtn.setBackground(ACCENT);
@@ -208,6 +248,60 @@ public class ChatFrame extends JFrame {
         root.add(inputArea, BorderLayout.SOUTH);
 
         inputField.requestFocusInWindow();
+    }
+
+    // ─── Menu admin ───────────────────────────────────────────────────────────
+
+    private void showAdminPopup(Component invoker, int x, int y, final String targetUser) {
+        JPopupMenu popup = new JPopupMenu();
+        popup.setBackground(BG_PANEL);
+        popup.setBorder(BorderFactory.createLineBorder(INPUT_BORDER));
+
+        JMenuItem kickItem = new JMenuItem("\u26A0 Expulser (Kick)");
+        kickItem.setFont(FONT_LABEL);
+        kickItem.setForeground(ADMIN_COLOR);
+        kickItem.setBackground(BG_PANEL);
+        kickItem.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent e) {
+                String reason = JOptionPane.showInputDialog(ChatFrame.this,
+                        "Raison de l'expulsion de \"" + targetUser + "\" :\n"
+                        + "(L'utilisateur pourra revenir)",
+                        "Expulser un utilisateur", JOptionPane.WARNING_MESSAGE);
+                if (reason != null) {
+                    if (reason.trim().isEmpty()) reason = "Aucune raison sp\u00e9cifi\u00e9e";
+                    Message msg = new Message(Message.Type.KICK_USER);
+                    msg.setSender(username);
+                    msg.setRoomName(roomName);
+                    msg.setContent(targetUser + "|" + reason.trim());
+                    client.send(msg);
+                }
+            }
+        });
+
+        JMenuItem banItem = new JMenuItem("\u26D4 Bannir (Ban)");
+        banItem.setFont(FONT_LABEL);
+        banItem.setForeground(ERROR_COLOR);
+        banItem.setBackground(BG_PANEL);
+        banItem.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent e) {
+                String reason = JOptionPane.showInputDialog(ChatFrame.this,
+                        "Raison du bannissement de \"" + targetUser + "\" :\n"
+                        + "(L'utilisateur ne pourra plus revenir dans ce salon)",
+                        "Bannir un utilisateur", JOptionPane.WARNING_MESSAGE);
+                if (reason != null && !reason.trim().isEmpty()) {
+                    Message msg = new Message(Message.Type.BAN_USER);
+                    msg.setSender(username);
+                    msg.setRoomName(roomName);
+                    msg.setContent(targetUser + "|" + reason.trim());
+                    client.send(msg);
+                }
+            }
+        });
+
+        popup.add(kickItem);
+        popup.addSeparator();
+        popup.add(banItem);
+        popup.show(invoker, x, y);
     }
 
     // ─── Envoi ────────────────────────────────────────────────────────────────
@@ -252,6 +346,20 @@ public class ChatFrame extends JFrame {
                     case MEMBER_LIST:
                         updateMembers(msg.getMembers());
                         break;
+                    case KICKED:
+                        JOptionPane.showMessageDialog(ChatFrame.this,
+                                msg.getContent(),
+                                "Expuls\u00e9 du salon", JOptionPane.WARNING_MESSAGE);
+                        lobby.chatClosed(roomName);
+                        dispose();
+                        break;
+                    case BANNED:
+                        JOptionPane.showMessageDialog(ChatFrame.this,
+                                msg.getContent(),
+                                "Banni du salon", JOptionPane.ERROR_MESSAGE);
+                        lobby.chatClosed(roomName);
+                        dispose();
+                        break;
                     default:
                         break;
                 }
@@ -265,48 +373,64 @@ public class ChatFrame extends JFrame {
         Color senderColor = getUserColor(sender);
         boolean isMe = sender.equals(username);
 
-        javax.swing.text.StyledDocument doc = chatArea.getStyledDocument();
+        StyledDocument doc = chatArea.getStyledDocument();
         try {
+            int startPos = doc.getLength();
+
             // Timestamp
-            javax.swing.text.Style tsStyle = chatArea.addStyle("ts_" + System.nanoTime(), null);
-            javax.swing.text.StyleConstants.setForeground(tsStyle, TEXT_SUB);
-            javax.swing.text.StyleConstants.setFontSize(tsStyle, 10);
+            Style tsStyle = chatArea.addStyle("ts_" + System.nanoTime(), null);
+            StyleConstants.setForeground(tsStyle, TEXT_SUB);
+            StyleConstants.setFontSize(tsStyle, 10);
             doc.insertString(doc.getLength(), "[" + time + "] ", tsStyle);
 
             // Pseudo
-            javax.swing.text.Style nameStyle = chatArea.addStyle("name_" + System.nanoTime(), null);
-            javax.swing.text.StyleConstants.setForeground(nameStyle, senderColor);
-            javax.swing.text.StyleConstants.setBold(nameStyle, true);
-            javax.swing.text.StyleConstants.setFontSize(nameStyle, 13);
+            Style nameStyle = chatArea.addStyle("name_" + System.nanoTime(), null);
+            StyleConstants.setForeground(nameStyle, senderColor);
+            StyleConstants.setBold(nameStyle, true);
+            StyleConstants.setFontSize(nameStyle, 13);
             doc.insertString(doc.getLength(), isMe ? "Vous" : sender, nameStyle);
 
             // Espace
-            javax.swing.text.Style sepStyle = chatArea.addStyle("sep_" + System.nanoTime(), null);
-            javax.swing.text.StyleConstants.setForeground(sepStyle, TEXT_SUB);
+            Style sepStyle = chatArea.addStyle("sep_" + System.nanoTime(), null);
+            StyleConstants.setForeground(sepStyle, TEXT_SUB);
             doc.insertString(doc.getLength(), "  ", sepStyle);
 
             // Contenu
-            javax.swing.text.Style contentStyle = chatArea.addStyle("cnt_" + System.nanoTime(), null);
-            javax.swing.text.StyleConstants.setForeground(contentStyle,
+            Style contentStyle = chatArea.addStyle("cnt_" + System.nanoTime(), null);
+            StyleConstants.setForeground(contentStyle,
                     isMe ? new Color(220, 220, 255) : TEXT_MAIN);
-            javax.swing.text.StyleConstants.setFontSize(contentStyle, 13);
+            StyleConstants.setFontSize(contentStyle, 13);
             doc.insertString(doc.getLength(), content + "\n", contentStyle);
 
-        } catch (javax.swing.text.BadLocationException e) {
+            // Alignement : droite pour "Vous", gauche pour les autres
+            SimpleAttributeSet alignment = new SimpleAttributeSet();
+            StyleConstants.setAlignment(alignment,
+                    isMe ? StyleConstants.ALIGN_RIGHT : StyleConstants.ALIGN_LEFT);
+            doc.setParagraphAttributes(startPos, doc.getLength() - startPos, alignment, false);
+
+        } catch (BadLocationException e) {
             e.printStackTrace();
         }
         scrollToBottom();
     }
 
     private void appendSystemMessage(String text) {
-        javax.swing.text.StyledDocument doc = chatArea.getStyledDocument();
+        StyledDocument doc = chatArea.getStyledDocument();
         try {
-            javax.swing.text.Style style = chatArea.addStyle("sys_" + System.nanoTime(), null);
-            javax.swing.text.StyleConstants.setForeground(style, new Color(100, 116, 139));
-            javax.swing.text.StyleConstants.setItalic(style, true);
-            javax.swing.text.StyleConstants.setFontSize(style, 11);
+            int startPos = doc.getLength();
+
+            Style style = chatArea.addStyle("sys_" + System.nanoTime(), null);
+            StyleConstants.setForeground(style, new Color(100, 116, 139));
+            StyleConstants.setItalic(style, true);
+            StyleConstants.setFontSize(style, 11);
             doc.insertString(doc.getLength(), "  " + text + "\n", style);
-        } catch (javax.swing.text.BadLocationException e) {
+
+            // Centrer les messages système
+            SimpleAttributeSet center = new SimpleAttributeSet();
+            StyleConstants.setAlignment(center, StyleConstants.ALIGN_CENTER);
+            doc.setParagraphAttributes(startPos, doc.getLength() - startPos, center, false);
+
+        } catch (BadLocationException e) {
             e.printStackTrace();
         }
         scrollToBottom();
@@ -335,29 +459,50 @@ public class ChatFrame extends JFrame {
 
     static class MemberCellRenderer extends DefaultListCellRenderer {
         private final String me;
-        MemberCellRenderer(String me) { this.me = me; }
+        private final String admin;
+        MemberCellRenderer(String me, String admin) {
+            this.me = me;
+            this.admin = admin;
+        }
 
         @Override
         public Component getListCellRendererComponent(JList<?> list, Object value,
                 int index, boolean isSelected, boolean cellHasFocus) {
-            JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
+            JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
             panel.setBackground(isSelected ? new Color(40, 45, 80) : BG_PANEL);
             panel.setBorder(new EmptyBorder(4, 8, 4, 8));
 
             String user = (String) value;
+            boolean isUserAdmin = user.equals(admin);
+            boolean isUserMe = user.equals(me);
 
-            JLabel dot = new JLabel("\u25CF");
-            dot.setForeground(SUCCESS_COLOR);
-            //dot.setFont(new Font("Segoe UI", Font.PLAIN, 10));
-            dot.setFont(new Font("Dialog", Font.PLAIN, 10)); // "Dialog" is Java's logical font, always works
-            
-            String label = user + (user.equals(me) ? "  (vous)" : "");
-            JLabel name = new JLabel(label);
+            // Icône : étoile dorée pour admin, point vert pour les autres
+            JLabel icon = new JLabel(isUserAdmin ? "\u2605" : "\u25CF");
+            icon.setFont(new Font("Dialog", Font.PLAIN, isUserAdmin ? 14 : 10));
+            icon.setForeground(isUserAdmin ? ADMIN_COLOR : SUCCESS_COLOR);
+            panel.add(icon);
+
+            // Nom + badges
+            StringBuilder label = new StringBuilder(user);
+            if (isUserMe && isUserAdmin) {
+                label.append("  (vous, admin)");
+            } else if (isUserMe) {
+                label.append("  (vous)");
+            } else if (isUserAdmin) {
+                label.append("  (admin)");
+            }
+
+            JLabel name = new JLabel(label.toString());
             name.setFont(FONT_LABEL);
-            name.setForeground(user.equals(me) ? ACCENT : TEXT_MAIN);
-
-            panel.add(dot);
+            if (isUserAdmin) {
+                name.setForeground(ADMIN_COLOR);
+            } else if (isUserMe) {
+                name.setForeground(ACCENT);
+            } else {
+                name.setForeground(TEXT_MAIN);
+            }
             panel.add(name);
+
             return panel;
         }
     }
