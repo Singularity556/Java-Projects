@@ -253,8 +253,9 @@ public class LobbyFrame extends JFrame {
 
                     case ROOM_JOINED: {
                         String roomName = msg.getRoomName();
+                        String creator = msg.getSender();
                         if (!openChats.containsKey(roomName)) {
-                            ChatFrame chat = new ChatFrame(username, roomName, msg.getContent(), client, LobbyFrame.this);
+                            ChatFrame chat = new ChatFrame(username, roomName, msg.getContent(), creator, client, LobbyFrame.this);
                             openChats.put(roomName, chat);
                         } else {
                             openChats.get(roomName).toFront();
@@ -272,7 +273,9 @@ public class LobbyFrame extends JFrame {
                     case CHAT_BROADCAST:
                     case USER_JOINED:
                     case USER_LEFT:
-                    case MEMBER_LIST: {
+                    case MEMBER_LIST:
+                    case KICKED:
+                    case BANNED: {
                         ChatFrame chat = openChats.get(msg.getRoomName());
                         if (chat != null) chat.handleMessage(msg);
                         break;

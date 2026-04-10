@@ -1,6 +1,7 @@
 package forum.server;
 
 import forum.common.ChatRoom;
+import forum.common.ClientHandler;
 import forum.common.Message;
 
 import java.util.*;
@@ -99,6 +100,15 @@ public class RoomManager {
         for (String member : room.getMembers()) {
             ClientHandler handler = connectedClients.get(member);
             if (handler != null) handler.sendMessage(msg);
+        }
+    }
+
+    // ─── Envoi direct ─────────────────────────────────────────────────────────
+
+    public void sendToUser(String username, Message message) {
+        ClientHandler handler = connectedClients.get(username);
+        if (handler != null) {
+            handler.sendMessage(message);
         }
     }
 

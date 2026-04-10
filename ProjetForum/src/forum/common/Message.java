@@ -33,7 +33,15 @@ public class Message implements Serializable {
         USER_LEFT,
         MEMBER_LIST,
         ERROR,
-        SERVER_INFO
+        SERVER_INFO,
+
+        // Admin (Client → Serveur)
+        KICK_USER,
+        BAN_USER,
+
+        // Admin (Serveur → Client)
+        KICKED,
+        BANNED
     }
 
     private Type type;
